@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-from PIL import Image
+from PIL import Image, ImageDraw
 import random
 import pandas as pd
 
@@ -52,9 +52,10 @@ with tab1:
             st.error("Please enter a valid text prompt.")
         else:
             with st.spinner("Synthesizing image from text prompt..."):
-                os.makedirs("outputs", output_dir := "outputs")
+                output_dir = "outputs"
+                os.makedirs(output_dir, exist_ok=True)
+                
                 img = Image.new("RGB", (width, height), color=(20, 30, 50))
-                from PIL import ImageDraw
                 draw = ImageDraw.Draw(img)
                 draw.rectangle([30, 30, width-30, height-30], outline=(0, 200, 255), width=3)
                 draw.text((50, 60), f"Prompt: {prompt[:60]}...", fill=(255, 255, 255))
