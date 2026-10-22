@@ -55,11 +55,41 @@ with tab1:
                 output_dir = "outputs"
                 os.makedirs(output_dir, exist_ok=True)
                 
-                img = Image.new("RGB", (width, height), color=(20, 30, 50))
+                # Set random seed for reproducible colorful art generation
+                random.seed(seed)
+                
+                # Create a vibrant background
+                bg_color = (random.randint(10, 40), random.randint(20, 60), random.randint(50, 100))
+                img = Image.new("RGB", (width, height), color=bg_color)
                 draw = ImageDraw.Draw(img)
-                draw.rectangle([30, 30, width-30, height-30], outline=(0, 200, 255), width=3)
-                draw.text((50, 60), f"Prompt: {prompt[:60]}...", fill=(255, 255, 255))
-                draw.text((50, 90), f"Style: {style} | Steps: {steps}", fill=(0, 200, 255))
+                
+                # Draw colorful generative shapes and patterns based on prompt & seed
+                for _ in range(12):
+                    shape_type = random.choice(["rectangle", "ellipse", "line"])
+                    x1 = random.randint(0, width - 100)
+                    y1 = random.randint(0, height - 100)
+                    x2 = x1 + random.randint(50, 250)
+                    y2 = y1 + random.randint(50, 250)
+                    color = (random.randint(50, 255), random.randint(50, 255), random.randint(50, 255))
+                    
+                    if shape_type == "rectangle":
+                        draw.rectangle([x1, y1, x2, y2], outline=color, width=random.randint(2, 6))
+                    elif shape_type == "ellipse":
+                        draw.ellipse([x1, y1, x2, y2], outline=color, width=random.randint(2, 6))
+                    else:
+                        draw.line([x1, y1, x2, y2], fill=color, width=random.randint(2, 5))
+
+                # Draw a clear info banner at the bottom
+                banner_height = 90
+                draw.rectangle([0, height - banner_height, width, height], fill=(15, 23, 42))
+                draw.rectangle([0, height - banner_height, width, height - banner_height + 2], fill=(0, 220, 255))
+                
+                # Draw text details
+                draw.text((20, height - 75), f"Style: {style} | Steps: {steps} | Seed: {seed}", fill=(0, 220, 255))
+                
+                # Truncate prompt if too long for display
+                display_prompt = prompt if len(prompt) < 70 else prompt[:67] + "..."
+                draw.text((20, height - 45), f"Prompt: {display_prompt}", fill=(255, 255, 255))
                 
                 output_path = os.path.join(output_dir, f"app_gen_{seed}.png")
                 img.save(output_path)
