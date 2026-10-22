@@ -1,14 +1,54 @@
 import streamlit as st
 import os
-from PIL import Image, ImageDraw
-import random
+import torch
 import pandas as pd
+from PIL import Image
+
+# Hugging Face Diffusers Library
+try:
+    from diffusers import StableDiffusionPipeline
+    DIFFUSERS_AVAILABLE = True
+except ImportError:
+    DIFFUSERS_AVAILABLE = False
 
 st.set_page_config(
     page_title="Text-to-Image AI Studio",
     page_icon="🎨",
     layout="wide"
 )
+
+# Cache model loading so it only loads once into memory
+@st.cache_resource
+def load_diffusion_pipeline():
+    if not DIFFUSERS_AVAILABLE:
+        return None, "diffusers library is not installed."
+    
+    model_id = "runwayml/stable-diffusion-v1-5"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    try:
+        if device == "cuda":
+            pipe = StableDiffusionPipeline.from_pretrained(
+                model_id,
+                torch_dtype=torch.float16
+            )
+            pipe = pipe.to("cuda")
+            # Enable memory optimization if available
+            if hasattr(pipe, "enable_attention_slicing"):
+                pipe.enable_attention_slicing()
+        else:
+            # CPU fallback (uses float32)
+            pipe = StableDiffusionPipeline.from_pretrained(
+                model_id,
+                torch_dtype=torch.float32
+            )
+            pipe = pipe.to("cpu")
+            if hasattr(pipe, "enable_attention_slicing"):
+                pipe.enable_attention_slicing()
+                
+        return pipe, f"Successfully loaded {model_id} on {device.upper()}"
+    except Exception as e:
+        return None, f"Failed to load model: {str(e)}"
 
 # Sidebar Controls
 st.sidebar.header("🎨 Generation Controls")
@@ -35,14 +75,16 @@ col1, col2 = st.sidebar.columns(2)
 width = col1.selectbox("Width", [512, 768], index=0)
 height = col2.selectbox("Height", [512, 768], index=0)
 
-steps = st.sidebar.slider("Inference Steps", 10, 50, 30)
+# Set lower default steps on CPU to save generation time
+default_steps = 25 if torch.cuda.is_available() else 15
+steps = st.sidebar.slider("Inference Steps", 10, 50, default_steps)
 seed = st.sidebar.number_input("Random Seed", value=42, step=1)
 
 generate_btn = st.sidebar.button("Generate Image", type="primary")
 
 # Main Interface
 st.title("🎨 Text-to-Image AI Generation System")
-st.markdown("Convert natural language text descriptions into high-quality images using synthetic dataset generation, deep learning, and diffusion pipelines.")
+st.markdown("Convert natural language text descriptions into real AI-generated images using Stable Diffusion.")
 
 tab1, tab2, tab3 = st.tabs(["🖼️ Generation Studio", "📊 Dataset Explorer", "⚙️ System Status"])
 
@@ -51,61 +93,47 @@ with tab1:
         if not prompt.strip():
             st.error("Please enter a valid text prompt.")
         else:
-            with st.spinner("Synthesizing image from text prompt..."):
-                output_dir = "outputs"
-                os.makedirs(output_dir, exist_ok=True)
+            with st.spinner("Loading Stable Diffusion Pipeline & Generating Image (this may take a few moments)..."):
+                pipe, status_msg = load_diffusion_pipeline()
                 
-                # Set random seed for reproducible colorful art generation
-                random.seed(seed)
-                
-                # Create a vibrant background
-                bg_color = (random.randint(10, 40), random.randint(20, 60), random.randint(50, 100))
-                img = Image.new("RGB", (width, height), color=bg_color)
-                draw = ImageDraw.Draw(img)
-                
-                # Draw colorful generative shapes and patterns based on prompt & seed
-                for _ in range(12):
-                    shape_type = random.choice(["rectangle", "ellipse", "line"])
-                    x1 = random.randint(0, width - 100)
-                    y1 = random.randint(0, height - 100)
-                    x2 = x1 + random.randint(50, 250)
-                    y2 = y1 + random.randint(50, 250)
-                    color = (random.randint(50, 255), random.randint(50, 255), random.randint(50, 255))
+                if pipe is None:
+                    st.error(f"Error loading AI model: {status_msg}")
+                else:
+                    output_dir = "outputs"
+                    os.makedirs(output_dir, exist_ok=True)
                     
-                    if shape_type == "rectangle":
-                        draw.rectangle([x1, y1, x2, y2], outline=color, width=random.randint(2, 6))
-                    elif shape_type == "ellipse":
-                        draw.ellipse([x1, y1, x2, y2], outline=color, width=random.randint(2, 6))
-                    else:
-                        draw.line([x1, y1, x2, y2], fill=color, width=random.randint(2, 5))
+                    # Prepare styled prompt
+                    full_prompt = f"{prompt}, {style.lower()} style, highly detailed, 4k resolution"
+                    
+                    # Set seed for reproducible generation
+                    generator = torch.Generator(device=pipe.device).manual_seed(seed)
+                    
+                    # Run inference
+                    result = pipe(
+                        prompt=full_prompt,
+                        width=width,
+                        height=height,
+                        num_inference_steps=steps,
+                        generator=generator
+                    )
+                    
+                    generated_image = result.images[0]
+                    
+                    output_path = os.path.join(output_dir, f"app_gen_{seed}.png")
+                    generated_image.save(output_path)
 
-                # Draw a clear info banner at the bottom
-                banner_height = 90
-                draw.rectangle([0, height - banner_height, width, height], fill=(15, 23, 42))
-                draw.rectangle([0, height - banner_height, width, height - banner_height + 2], fill=(0, 220, 255))
-                
-                # Draw text details
-                draw.text((20, height - 75), f"Style: {style} | Steps: {steps} | Seed: {seed}", fill=(0, 220, 255))
-                
-                # Truncate prompt if too long for display
-                display_prompt = prompt if len(prompt) < 70 else prompt[:67] + "..."
-                draw.text((20, height - 45), f"Prompt: {display_prompt}", fill=(255, 255, 255))
-                
-                output_path = os.path.join(output_dir, f"app_gen_{seed}.png")
-                img.save(output_path)
-
-            st.success("Image generated successfully!")
-            st.image(output_path, caption=f"Generated Image: {prompt} ({style})", use_container_width=True)
-            
-            with open(output_path, "rb") as file:
-                st.download_button(
-                    label="Download Generated Image",
-                    data=file,
-                    file_name=f"generated_{seed}.png",
-                    mime="image/png"
-                )
+                    st.success("Real AI Image generated successfully!")
+                    st.image(output_path, caption=f"Generated Image: '{prompt}' ({style})", use_container_width=True)
+                    
+                    with open(output_path, "rb") as file:
+                        st.download_button(
+                            label="Download Generated Image",
+                            data=file,
+                            file_name=f"generated_{seed}.png",
+                            mime="image/png"
+                        )
     else:
-        st.info("Configure your prompt in the sidebar and click **Generate Image** to begin.")
+        st.info("Configure your prompt in the sidebar and click **Generate Image** to run Stable Diffusion.")
 
 with tab2:
     st.subheader("Dataset Overview")
@@ -113,20 +141,18 @@ with tab2:
         df = pd.read_csv("dataset/metadata.csv")
         st.metric("Total Dataset Records", len(df))
         st.dataframe(df[["image_id", "category", "style", "prompt"]].head(20), use_container_width=True)
-        
         st.bar_chart(df["category"].value_counts())
     else:
         st.warning("Dataset not found. Run `python generate_dataset.py --count 1000` to generate the dataset.")
 
 with tab3:
     st.subheader("Hardware & Execution Status")
-    import torch
     gpu_available = torch.cuda.is_available()
     st.info(f"GPU Available: **{gpu_available}**")
     if gpu_available:
         st.success(f"GPU Device: {torch.cuda.get_device_name(0)}")
     else:
-        st.warning("Running on CPU. For fast training and high-res diffusion generation, use Google Colab or an NVIDIA GPU.")
+        st.warning("Running on CPU. Real AI image generation on CPU will take 1-3 minutes per image. For 5-second generations, run this code on Google Colab with a free T4 GPU!")
     
     st.markdown("### Execution Instructions")
     st.code("python -m venv venv\nvenv\\Scripts\\activate\npip install -r requirements.txt\npython generate_dataset.py --count 1000\nstreamlit run app.py")
